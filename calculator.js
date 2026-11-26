@@ -93,13 +93,54 @@
     const weaponGuaranteed = Boolean(Number(input.weaponGuaranteed));
     const fatePoint = clampInt(input.fatePoint, 0, 1);
 
-    // These bounds cover the worst possible number of pulls under the modeled guarantees.
+    // Hard-pity maximums under this model: at most two 5-stars per target copy.
     const maxNeeded = characterCopies * 180 + weaponCopies * 160;
     const limit = Math.min(wishes, maxNeeded);
     const characterCdf = successCdf('character', limit, characterCopies, characterPity, characterGuaranteed, 0, radiance);
     const weaponCdf = successCdf('weapon', limit, weaponCopies, weaponPity, weaponGuaranteed, fatePoint, 0);
     const characterPmf = toPmf(characterCdf);
     const weaponPmf = toPmf(weaponCdf);
+
+    const worstCasePulls = (banner, copies, initialPity, initialGuarantee, path, initialRadiance) => {
+      const hardPity = banner === 'character' ? 90 : 80;
+      let pulls = 0;
+      let pity = initialPity;
+      let guarantee = initialGuarantee;
+      let fatePointState = path;
+      let radianceState = initialRadiance;
+
+      for (let copy = 0; copy < copies; copy++) {
+        pulls += hardPity - pity;
+        pity = 0;
+
+        if (banner === 'character') {
+          if (guarantee) {
+            guarantee = false;
+          } else if (radianceState >= 3) {
+            // Capturing Radiance guarantees this copy; a featured win resets its counter.
+            radianceState = 0;
+          } else {
+            // The first 5-star counted above is lost; the next one is guaranteed.
+            radianceState += 1;
+            guarantee = true;
+            pulls += hardPity;
+            guarantee = false;
+          }
+        } else if (fatePointState) {
+          fatePointState = false;
+        } else {
+          // A non-selected 5-star grants a Fate Point; the next 5-star is the target.
+          pulls += hardPity;
+          fatePointState = false;
+        }
+      }
+
+      return pulls;
+    };
+
+    const guaranteedPulls =
+      worstCasePulls('character', characterCopies, characterPity, characterGuaranteed, 0, radiance) +
+      worstCasePulls('weapon', weaponCopies, weaponPity, weaponGuaranteed, fatePoint, 0);
 
     let combined = 0;
     for (let charPulls = 0; charPulls <= limit; charPulls++) {
@@ -116,7 +157,8 @@
       weaponOnly: safe(weaponCdf[Math.min(wishes, weaponCdf.length - 1)]),
       wishes,
       characterCopies,
-      weaponCopies
+      weaponCopies,
+      guaranteedPulls
     };
   }
 
